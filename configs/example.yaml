@@ -1,5 +1,5 @@
 # Production MCP server configuration
-# Copy to /etc/statmon-mcp/config.yaml on each DNS node.
+# Copy to /etc/cli-mcp-server/config.yaml on each DNS node.
 #
 # Tools are declared as YAML entries under catalog.path. Each entry names a
 # binary (absolute path or bare name resolved via search_paths) and its
@@ -12,7 +12,7 @@ server:
   node_name: "dns-node-a"    # Change per node
 
 catalog:
-  path: "/etc/statmon-mcp/catalog/"
+  path: "/etc/cli-mcp-server/catalog/"
   search_paths:
     - /usr/local/sbin
     - /usr/local/bin

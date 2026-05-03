@@ -1,7 +1,7 @@
 """MCP server exposing catalog-driven CLI tools via SSE transport.
 
-Loads config from STATMON_MCP_CONFIG env var, ~/.config/statmon-mcp/config.yaml,
-or /etc/statmon-mcp/config.yaml. Tools are declared as YAML entries in the
+Loads config from CLI_MCP_CONFIG env var, ~/.config/cli-mcp-server/config.yaml,
+or /etc/cli-mcp-server/config.yaml. Tools are declared as YAML entries in the
 catalog directory (config["catalog"]["path"]); the server registers one MCP
 Tool per entry and dispatches call_tool() through the registry.
 """
@@ -41,17 +41,17 @@ DEFAULT_SEARCH_PATHS = [
 
 
 def load_config() -> dict:
-    config_path = os.environ.get("STATMON_MCP_CONFIG")
+    config_path = os.environ.get("CLI_MCP_CONFIG")
     if not config_path:
-        user_path = Path.home() / ".config" / "statmon-mcp" / "config.yaml"
-        config_path = str(user_path) if user_path.exists() else "/etc/statmon-mcp/config.yaml"
+        user_path = Path.home() / ".config" / "cli-mcp-server" / "config.yaml"
+        config_path = str(user_path) if user_path.exists() else "/etc/cli-mcp-server/config.yaml"
     with open(config_path) as f:
         return yaml.safe_load(f)
 
 
 CONFIG: dict | None = None
 REGISTRY: ToolRegistry | None = None
-mcp_server = Server("statmon-mcp")
+mcp_server = Server("cli-mcp-server")
 sse_transport = SseServerTransport("/messages/")
 
 
@@ -67,7 +67,7 @@ def get_registry() -> ToolRegistry:
     if REGISTRY is None:
         cat_cfg = get_config().get("catalog") or {}
         REGISTRY = load_catalog(
-            cat_cfg.get("path", "/etc/statmon-mcp/catalog/"),
+            cat_cfg.get("path", "/etc/cli-mcp-server/catalog/"),
             defaults=cat_cfg.get("defaults") or {},
             search_paths=cat_cfg.get("search_paths") or DEFAULT_SEARCH_PATHS,
         )

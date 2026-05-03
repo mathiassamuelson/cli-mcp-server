@@ -1,11 +1,11 @@
-"""Tests for statmon_mcp.cli_executor — subprocess execution."""
+"""Tests for cli_mcp.cli_executor — subprocess execution."""
 
 import os
 import stat
 import tempfile
 import textwrap
 import pytest
-from statmon_mcp.cli_executor import run_cli
+from cli_mcp.cli_executor import run_cli
 
 
 @pytest.fixture

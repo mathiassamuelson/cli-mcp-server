@@ -1,4 +1,4 @@
-"""Catalog-driven tool registry for statmon-mcp.
+"""Catalog-driven tool registry for cli-mcp-server.
 
 Loads YAML tool entries from a catalog directory, validates them, resolves
 binary paths against a configured search_paths list (never PATH), and exposes

@@ -1,1 +1,1 @@
-# statmon-mcp: MCP server exposing Statmon CLI tools
+# cli-mcp-server: MCP server exposing CLI tools as MCP tools

@@ -1,5 +1,5 @@
 [project]
-name = "statmon-mcp"
+name = "cli-mcp-server"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,4 +14,4 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["statmon_mcp*"]
+include = ["cli_mcp*"]
