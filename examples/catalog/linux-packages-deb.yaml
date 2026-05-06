@@ -1,3 +1,4 @@
+# category: read-only
 - name: dpkg
   description: |
     Debian package query. Install, remove, configure verbs are denied;

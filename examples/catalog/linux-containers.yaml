@@ -1,3 +1,4 @@
+# category: read-only
 - name: docker
   description: |
     Docker client. Read-only verbs only — exec, run, build, rm, kill,

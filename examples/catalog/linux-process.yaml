@@ -1,3 +1,4 @@
+# category: read-only
 - name: ps
   description: |
     Report running process status. Read-only snapshot.

@@ -1,3 +1,4 @@
+# category: read-only
 - name: getenforce
   description: Get the current SELinux mode (Enforcing, Permissive, or Disabled).
   binary: getenforce

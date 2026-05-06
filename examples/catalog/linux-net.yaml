@@ -1,3 +1,4 @@
+# category: read-only
 - name: ip
   description: |
     Show / inspect routing, devices, addresses, neighbors, and tunnels.

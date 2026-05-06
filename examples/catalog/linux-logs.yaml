@@ -1,3 +1,4 @@
+# category: read-only
 - name: journalctl
   description: |
     Query the systemd journal. Follow modes are denied (would block the

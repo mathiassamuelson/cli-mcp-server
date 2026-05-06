@@ -1,3 +1,4 @@
+# category: read-only
 - name: lsmod
   description: Show the status of modules in the Linux kernel.
   binary: lsmod

@@ -1,3 +1,4 @@
+# category: read-only
 - name: lsblk
   description: List block devices.
   binary: lsblk

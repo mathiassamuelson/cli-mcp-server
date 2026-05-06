@@ -1,3 +1,4 @@
+# category: read-only
 - name: systemctl
   description: |
     Query systemd unit and system state. Read-only verbs only — start,

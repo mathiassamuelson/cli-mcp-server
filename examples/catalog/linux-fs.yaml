@@ -1,3 +1,4 @@
+# category: read-only
 - name: ls
   description: List directory contents.
   binary: ls

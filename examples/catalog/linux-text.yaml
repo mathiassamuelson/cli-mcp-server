@@ -1,3 +1,4 @@
+# category: read-only
 - name: cat
   description: Concatenate and print files.
   binary: cat

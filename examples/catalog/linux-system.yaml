@@ -1,3 +1,4 @@
+# category: read-only
 - name: free
   description: Display amount of free and used memory in the system.
   binary: free

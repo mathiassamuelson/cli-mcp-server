@@ -1,3 +1,4 @@
+# category: read-only
 - name: rpm
   description: |
     RPM package query and verify. Install (-i), erase (-e), and rebuild
