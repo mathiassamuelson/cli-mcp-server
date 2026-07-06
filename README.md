@@ -354,4 +354,4 @@ This server was extracted from a project that wraps DNS query-log analysis CLIs 
 
 ## License
 
-TBD — to be added before tagging a release.
+Licensed under Apache 2.0. See [LICENSE](LICENSE) for details.
