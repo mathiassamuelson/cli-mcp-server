@@ -31,6 +31,7 @@ SAFE_ENV = {
 }
 
 STDERR_CAP_BYTES = 8192
+REAP_TIMEOUT_SECONDS = 2
 
 
 async def _read_capped(stream: asyncio.StreamReader, cap: int) -> tuple[bytes, bool]:
@@ -54,16 +55,48 @@ async def _read_capped(stream: asyncio.StreamReader, cap: int) -> tuple[bytes, b
     return b"".join(chunks), truncated
 
 
-async def _kill(proc: asyncio.subprocess.Process) -> None:
+def _signal_kill(proc: asyncio.subprocess.Process) -> None:
+    """SIGKILL without waiting. Separated from reaping so callers can drain
+    a pipe in between — see _drain."""
     if proc.returncode is None:
         try:
             proc.kill()
         except ProcessLookupError:
-            return
-        try:
-            await proc.wait()
-        except Exception:
             pass
+
+
+async def _reap(proc: asyncio.subprocess.Process) -> None:
+    """Wait for an already-signalled process, bounded.
+
+    The bound matters: asyncio only completes Process.wait() once every pipe
+    has disconnected, so an undrained stdout pipe blocks it indefinitely. The
+    timeout keeps a stuck reap from hanging the whole request.
+    """
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=REAP_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+
+
+async def _drain(stream: asyncio.StreamReader | None) -> None:
+    """Consume and discard whatever is left so the pipe reaches EOF.
+
+    Only safe once the producers are dead — then what remains is bounded by
+    the pipe buffer. Without this, Process.wait() on a capped-and-killed
+    stage never returns.
+    """
+    if stream is None:
+        return
+    try:
+        while await stream.read(65536):
+            pass
+    except Exception:
+        pass
+
+
+async def _kill(proc: asyncio.subprocess.Process) -> None:
+    _signal_kill(proc)
+    await _reap(proc)
 
 
 def _build_argv(entry: "ToolEntry", args: str) -> list[str]:
@@ -235,8 +268,15 @@ async def run_pipeline(stages: Sequence[tuple["ToolEntry", str]]) -> dict:
         }
 
     if stdout_trunc:
+        # Kill every stage first so nothing can keep producing, then drain the
+        # last stage's stdout so its pipe disconnects and the reap can finish.
+        # Reaping before draining deadlocks: asyncio holds Process.wait() open
+        # until all pipes are gone.
         for p in procs:
-            await _kill(p)
+            _signal_kill(p)
+        await _drain(last.stdout)
+        for p in procs:
+            await _reap(p)
         stdout = stdout + f"\n[output truncated at {cap} bytes]".encode()
 
     try:
@@ -265,9 +305,14 @@ async def run_pipeline(stages: Sequence[tuple["ToolEntry", str]]) -> dict:
         "pipeline": [{"tool": e.name, "args": a} for e, a in stages],
     }
 
-    if last_rc == 0:
+    # A cap-induced kill is success-with-truncation, matching run_tool: we got
+    # what we asked for, then stopped the producer on purpose. Without this the
+    # kill's -9 would be reported as an error.
+    if last_rc == 0 or stdout_trunc:
         result["status"] = "success"
         result["result"] = stdout.decode(errors="replace").rstrip("\n")
+        if stdout_trunc:
+            result["truncated"] = True
     else:
         result["status"] = "error"
         result["error"] = (

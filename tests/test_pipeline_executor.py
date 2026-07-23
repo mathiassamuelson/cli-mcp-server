@@ -127,6 +127,45 @@ async def test_non_last_nonzero_surfaces_warning(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_output_cap_truncates_and_does_not_hang(tmp_path):
+    """Regression: run_pipeline hung indefinitely on the truncation path.
+
+    It reaped the last stage before draining its stdout, and asyncio holds
+    Process.wait() open until every pipe disconnects — so wait() never
+    returned, well past the pipeline's own timeout. Also asserts the envelope
+    matches run_tool: truncation is success-with-truncation, not an error.
+    """
+    flood = _script(tmp_path, "flood", """
+        import sys, time
+        for _ in range(4000):
+            sys.stdout.write('A' * 64 + '\\n')
+        sys.stdout.flush()
+        time.sleep(30)
+    """)
+    fwd = _script(tmp_path, "fwd", """
+        import sys
+        while True:
+            chunk = sys.stdin.buffer.read(4096)
+            if not chunk:
+                break
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+    """)
+    lead = _entry("flood", flood, timeout=10, max_bytes=8192)
+    pipe = _entry("fwd", fwd, pipe_stage=True, max_bytes=8192)
+
+    start = time.monotonic()
+    out = await run_pipeline([(lead, ""), (pipe, "")])
+    elapsed = time.monotonic() - start
+
+    # Producer would have slept 30s; the pipeline's own timeout was 10s.
+    assert elapsed < 8.0, f"took {elapsed:.1f}s — the reap is blocking again"
+    assert out["status"] == "success"
+    assert out["truncated"] is True
+    assert "[output truncated at 8192 bytes]" in out["result"]
+
+
+@pytest.mark.asyncio
 async def test_unhealthy_segment(tmp_path):
     cat = _script(tmp_path, "catlike", """
         import sys
