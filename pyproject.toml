@@ -3,10 +3,18 @@ name = "cli-mcp-server"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp[server]",
+    "mcp",
     "pyyaml",
     "starlette",
     "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
 ]
 
 [build-system]
@@ -15,3 +23,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["cli_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests that bind a socket and run a live server",
+]
