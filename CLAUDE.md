@@ -37,6 +37,20 @@ other build systems. Two consequences for how you work:
 - **Security-boundary tests assert absence of effect.** A denial test should
   prove the subprocess never ran, not just that the envelope says `denied`.
 
+## Release conventions
+
+- Every behavioral change ships a probe in `scripts/verify/conformance.py`,
+  registered against the release that introduced it. Keep it dependency-free —
+  a check that needs pytest belongs in `tests/`.
+- Every change gets a `CHANGELOG.md` entry under `Unreleased`. Tag entries that
+  affect downstream porting: `[security-boundary]`, `[behavior-change]`,
+  `[api-change]`, `[build-coupled]`.
+- Releases with anything non-obvious to port get `docs/migrations/vX.Y.Z.md`,
+  written **during** the work. Reconstructing it from the diff afterwards
+  loses the traps, which are the part worth recording.
+- Keep commits single-purpose and independently green so they can be
+  cherry-picked and bisected.
+
 ## Things that are easy to get wrong
 
 - `filter.py` and `pipeline.py` are the security boundary. `pipeline.py`

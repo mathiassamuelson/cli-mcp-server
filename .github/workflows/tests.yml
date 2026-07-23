@@ -27,3 +27,6 @@ jobs:
 
       - name: Run tests
         run: pytest -q --cov=cli_mcp --cov-report=term-missing
+
+      - name: Conformance probes
+        run: python scripts/verify/conformance.py
