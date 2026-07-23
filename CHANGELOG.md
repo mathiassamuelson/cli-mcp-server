@@ -16,6 +16,13 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ## [Unreleased]
 
+### Changed
+
+- CI uses `actions/checkout@v5` and `actions/setup-python@v6`. The v4/v5
+  versions target Node.js 20, which GitHub has deprecated and is force-running
+  on Node 24; runs succeed today but break when that fallback is removed.
+  `[build-coupled]`
+
 ## [0.2.0] - 2026-07-23
 
 First release with downstream porting support:
