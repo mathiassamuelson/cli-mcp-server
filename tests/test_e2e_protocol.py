@@ -90,18 +90,14 @@ async def test_pipeline_through_protocol(e2e_config):
         assert "ARGV" in body["result"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: resolve_pipeline strips the tool name leaving empty args, and "
-        "check_command rejects the empty string. Any argument-less pipe stage "
-        "(| wc, | sort, | uniq, | tac, | nl) is unusable even under allow: ['*']."
-    ),
-)
 async def test_argument_less_pipe_stage(e2e_config):
+    """Regression: `| upper` with no args was denied, because resolve_pipeline
+    strips the tool name leaving "" and check_command used to reject the empty
+    string outright. Affected | wc, | sort, | uniq, | tac, | nl."""
     async with mcp_session() as session:
         body = payload(await session.call_tool("fake", {"command": "ok hi | upper"}))
         assert body["status"] == "success"
+        assert "ARGV" in body["result"]
 
 
 async def test_unhealthy_tool_is_listed_but_errors_on_call(e2e_config):

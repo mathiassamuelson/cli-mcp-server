@@ -24,12 +24,16 @@ def glob_match(command: str, pattern: str) -> bool:
 def check_command(command: str, rules: dict) -> tuple[bool, str]:
     """Check if a command is allowed by the deny/allow rules.
 
+    An empty command means "invoke the tool with no arguments" — legitimate
+    for `uptime`, `free`, or a bare pipe stage like `| wc`. It is matched
+    against the patterns like any other command rather than being rejected
+    up front, so `allow: ["*"]` permits it while `allow: ["ps *"]` does not.
+    The authorization decision stays with the catalog author.
+
     Returns:
         (allowed, reason) — True if allowed, False if denied.
     """
     cmd = command.strip()
-    if not cmd:
-        return False, "Empty command"
 
     for pattern in rules.get("deny", []):
         if glob_match(cmd, pattern):

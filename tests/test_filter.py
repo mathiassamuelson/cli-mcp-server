@@ -58,14 +58,31 @@ class TestCheckCommand:
         assert not allowed
         assert "does not match any allow rule" in reason
 
-    def test_empty_command(self):
+    def test_empty_command_falls_through_to_patterns(self):
+        # No pattern in LINUX_RULES matches "", so it is denied — but by the
+        # default-deny rule, not by a blanket empty-string rejection.
         allowed, reason = check_command("", self.LINUX_RULES)
         assert not allowed
-        assert "Empty command" in reason
+        assert "does not match any allow rule" in reason
 
     def test_whitespace_command(self):
         allowed, reason = check_command("   ", self.LINUX_RULES)
         assert not allowed
+
+    def test_no_argument_invocation_allowed_by_wildcard(self):
+        # `uptime`, `free`, and bare pipe stages like `| wc` invoke their
+        # binary with no arguments. allow: ["*"] must permit that.
+        for cmd in ("", "   "):
+            allowed, reason = check_command(cmd, {"deny": [], "allow": ["*"]})
+            assert allowed, reason
+
+    def test_no_argument_invocation_still_needs_an_allow_match(self):
+        allowed, _ = check_command("", {"deny": [], "allow": ["ps *"]})
+        assert not allowed
+
+    def test_deny_rules_do_not_match_empty(self):
+        allowed, _ = check_command("", {"deny": ["rm *", "shutdown*"], "allow": ["*"]})
+        assert allowed
 
     def test_command_with_args_allowed(self):
         allowed, _ = check_command(
