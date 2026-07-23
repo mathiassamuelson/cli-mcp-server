@@ -4,7 +4,8 @@ Loads YAML tool entries from a catalog directory, validates them, resolves
 binary paths against a configured search_paths list (never PATH), and exposes
 them as a ToolRegistry the server uses to advertise and dispatch MCP tools.
 
-See docs/SPEC-catalog-driven-mcp.md §3 for the full schema and semantics.
+See "Catalog entries" and "Allow/deny rules" in README.md for the full schema
+and semantics.
 """
 
 from __future__ import annotations
