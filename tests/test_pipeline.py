@@ -99,6 +99,26 @@ class TestResolvePipeline:
         with pytest.raises(PipelineResolutionError, match="not a pipe stage"):
             resolve_pipeline(ps, ["aux", "ps fake"], registry)
 
+    @pytest.mark.parametrize(
+        "segment",
+        ['"grep" nginx', "'grep' -v root", '"grep"', "'grep'"],
+    )
+    def test_quoted_tool_name_rejected(self, registry, segment):
+        """Regression: shlex strips the quotes, so seg[len(tool_name):] landed
+        mid-string and produced corrupted args ('p" nginx') that were then both
+        filtered and executed."""
+        ps = registry.get("ps")
+        with pytest.raises(PipelineResolutionError, match="unquoted"):
+            resolve_pipeline(ps, ["aux", segment], registry)
+
+    def test_argument_less_pipe_stage_resolves_to_empty_args(self, registry):
+        # `| grep` with no args must resolve cleanly; whether it is permitted
+        # is then up to the tool's rules, not to the resolver.
+        ps = registry.get("ps")
+        stages = resolve_pipeline(ps, ["aux", "grep"], registry)
+        assert stages[1][0].name == "grep"
+        assert stages[1][1] == ""
+
     def test_lead_can_be_a_non_pipe_stage_tool(self, registry):
         # This is the important asymmetry: ps has pipe_stage=False, but it's
         # always allowed as the lead.

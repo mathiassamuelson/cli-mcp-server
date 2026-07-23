@@ -136,6 +136,17 @@ def resolve_pipeline(
             )
         # Re-extract the original args text after the tool name. shlex.join
         # would re-quote; we just take everything after the name.
+        #
+        # That slice is only valid if the name appears literally at the start
+        # of the segment. If it was quoted ('"grep" nginx'), shlex strips the
+        # quotes and len(tool_name) lands mid-string, silently corrupting the
+        # args — 'p" nginx' — which then gets filtered AND executed. Require an
+        # unquoted name rather than trying to reconstruct the offset.
+        if not seg.startswith(tool_name):
+            raise PipelineResolutionError(
+                f"segment {i}: tool name must appear unquoted at the start "
+                f"of the segment (got {seg!r})"
+            )
         rest = seg[len(tool_name):].lstrip()
         stages.append((entry, rest))
 
