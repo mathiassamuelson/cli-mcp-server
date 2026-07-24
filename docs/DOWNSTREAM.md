@@ -56,13 +56,79 @@ transport-agnostic and carries across unchanged.
    `[build-coupled]` entries you rewrite rather than port.
 
 4. **Port.** Commits are kept small, single-purpose, and independently green,
-   so `git bisect` works and individual commits can be cherry-picked. If your
-   fork shares git ancestry with upstream, try cherry-picking before
-   reimplementing.
+   so individual changes can be applied in isolation. See
+   [Applying upstream patches](#applying-upstream-patches) — cherry-picking by
+   SHA does not work for the forks that exist today, but applying upstream's
+   diffs does.
 
 5. **Re-run the conformance probes.** All checks should pass.
 
 6. **Record your sync point** — see below.
+
+## Applying upstream patches
+
+The known forks are **unrelated-history imports**: the code was copied into a
+new repo with its own root commit, often with the package relocated (e.g.
+`cli_mcp/` living under `bin/<something>/lib/`). Two consequences.
+
+**There is no common ancestor**, so `git cherry-pick <upstream-sha>` has
+nothing to rebase against. Confirm your own situation with:
+
+```bash
+git remote add upstream https://github.com/mathiassamuelson/cli-mcp-server.git
+git fetch upstream --tags
+git merge-base HEAD upstream/main     # no output + non-zero: unrelated
+```
+
+**Add the remote anyway.** Even with no shared history, having upstream's
+objects locally lets you read the real diffs instead of reconstructing changes
+from prose:
+
+```bash
+git diff upstream/v0.1.0..upstream/v0.2.0 -- cli_mcp/
+git show upstream/main:cli_mcp/filter.py
+```
+
+### Recipe for a relocated package root
+
+Split each commit by pathspec, because `--directory` prepends to *every* path
+in the patch — applying a whole commit that touches both `cli_mcp/` and
+`tests/` would bury the tests inside the package directory:
+
+```bash
+# source changes -> relocated package root
+git format-patch -1 <sha> --stdout -- cli_mcp \
+  | git apply --directory=bin/cli-mcp-server/lib -p1
+
+# test changes -> wherever your tests actually live
+git format-patch -1 <sha> --stdout -- tests | git apply -p1
+```
+
+**`git apply` is atomic.** If any file in the patch is missing downstream, the
+*entire* patch is silently discarded — including the hunks that would have
+applied. This bites when a commit also touches a test file your fork does not
+have yet. Exclude it explicitly:
+
+```bash
+git format-patch -1 <sha> --stdout -- tests \
+  | git apply -p1 --exclude=tests/test_e2e_protocol.py
+```
+
+Use `--3way` for fallback merging when context has drifted, and `--reject` if
+you would rather get `.rej` files than an all-or-nothing failure.
+
+### Running the probes with a relocated package
+
+`scripts/verify/conformance.py` expects `cli_mcp` to be importable from the
+repo root. If yours lives elsewhere, point `PYTHONPATH` at it:
+
+```bash
+PYTHONPATH=bin/cli-mcp-server/lib python scripts/verify/conformance.py
+```
+
+This whole recipe was validated against a scratch repo reproducing exactly
+that shape — unrelated history, relocated package root — taking it from 5/5
+probes failing to 5/5 passing.
 
 ## Recording your sync point
 

@@ -8,6 +8,13 @@ python scripts/verify/conformance.py -v         # detail on passing checks too
 
 Exit status is 0 only if every check passes.
 
+If your fork keeps `cli_mcp` somewhere other than the repo root, point
+`PYTHONPATH` at it:
+
+```bash
+PYTHONPATH=bin/cli-mcp-server/lib python scripts/verify/conformance.py
+```
+
 ## What these are for
 
 These probe **behavior**, not implementation, and they depend on nothing but

@@ -16,6 +16,13 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/DOWNSTREAM.md` gains an "Applying upstream patches" recipe for forks
+  that are unrelated-history imports with a relocated package root — the shape
+  the known forks actually have. Validated against a scratch repo reproducing
+  it, from 5/5 conformance probes failing to 5/5 passing.
+
 ### Changed
 
 - CI uses `actions/checkout@v5` and `actions/setup-python@v6`. The v4/v5
