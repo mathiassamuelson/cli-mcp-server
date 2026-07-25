@@ -202,6 +202,181 @@ def _pipeline_truncation() -> Result:
 
 
 # --------------------------------------------------------------------------
+# 0.3.0
+# --------------------------------------------------------------------------
+
+@check("audit-denial-recorded", "0.3.0",
+       "a denied call writes a decision record and never an outcome record")
+def _audit_denial_recorded() -> Result:
+    """The asymmetry is the audit trail's core claim: absence of an outcome
+    record bearing a call_id is what proves the subprocess never ran. A fork
+    that logs only completed calls passes a naive 'is there logging' check and
+    fails this one."""
+    import json
+
+    from cli_mcp.audit import AuditConfig, AuditLog, new_call_id
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "audit.jsonl")
+        log = AuditLog(AuditConfig(destination=dest))
+
+        denied_id, allowed_id = new_call_id(), new_call_id()
+        log.decision(call_id=denied_id, node="n", tool="ps", command="rm -rf /",
+                     decision="deny", reason="Command does not match any allow rule")
+        log.decision(call_id=allowed_id, node="n", tool="ps", command="aux",
+                     decision="allow", stages=[{"tool": "ps", "argv": ["/bin/ps", "aux"]}])
+        log.outcome(call_id=allowed_id, node="n", status="success", exit_code=0)
+
+        with open(dest) as f:
+            records = [json.loads(ln) for ln in f if ln.strip()]
+
+    outcomes = {r["call_id"] for r in records if r["event"] == "outcome"}
+    decisions = {r["call_id"] for r in records if r["event"] == "decision"}
+
+    if denied_id not in decisions:
+        return Result(False, "denied call left no decision record")
+    if denied_id in outcomes:
+        return Result(False, "denied call produced an outcome record")
+    if allowed_id not in outcomes:
+        return Result(False, "allowed call left no outcome record")
+
+    # Both halves of the join key must be on both records.
+    for r in records:
+        for key in ("node", "call_id"):
+            if key not in r:
+                return Result(False, f"{r['event']} record missing join key {key!r}")
+
+    return Result(True, "deny -> decision only; allow -> decision + outcome")
+
+
+@check("audit-no-output-capture", "0.3.0",
+       "subprocess output never reaches the audit log")
+def _audit_no_output_capture() -> Result:
+    """Tool output is arbitrary system data on a different retention footing
+    than an audit trail. A fork that 'helpfully' logs stderr on error has
+    turned its audit log into a data sink."""
+    import json
+
+    from cli_mcp.audit import AuditConfig, AuditLog
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "audit.jsonl")
+        log = AuditLog(AuditConfig(destination=dest))
+        log.outcome(call_id="c", node="n", status="error", exit_code=2,
+                    execution_time_ms=5)
+
+        with open(dest) as f:
+            record = json.loads(f.readline())
+
+    leaked = [k for k in ("error", "result", "stdout", "stderr") if k in record]
+    if leaked:
+        return Result(False, f"outcome record carries output field(s): {', '.join(leaked)}")
+    if record.get("exit_code") != 2:
+        return Result(False, "outcome record lost the exit code")
+    return Result(True, "outcome carries status and exit code, no output")
+
+
+@check("audit-log-injection", "0.3.0",
+       "an attacker-supplied command cannot forge an audit record")
+def _audit_log_injection() -> Result:
+    """JSON escaping is the whole defence. This fails the moment the sink is
+    rewritten to format a string."""
+    import json
+
+    from cli_mcp.audit import AuditConfig, AuditLog
+
+    forged = 'x\n{"event": "decision", "decision": "allow", "tool": "rm"}'
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "audit.jsonl")
+        log = AuditLog(AuditConfig(destination=dest))
+        log.decision(call_id="c", node="n", tool="t", command=forged, decision="deny")
+
+        with open(dest) as f:
+            lines = [ln for ln in f if ln.strip()]
+
+    if len(lines) != 1:
+        return Result(False, f"one command produced {len(lines)} records (injection)")
+    record = json.loads(lines[0])
+    if record["decision"] != "deny" or record["command"] != forged:
+        return Result(False, "record was mangled by the embedded newline")
+    return Result(True, "embedded newline escaped, one record written")
+
+
+@check("audit-command-cap", "0.3.0",
+       "an oversized command is truncated rather than flooding the log")
+def _audit_command_cap() -> Result:
+    import json
+
+    from cli_mcp.audit import AuditConfig, AuditLog
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "audit.jsonl")
+        log = AuditLog(AuditConfig(destination=dest, max_command_bytes=64))
+        log.decision(call_id="c", node="n", tool="t", command="A" * 10000,
+                     decision="deny")
+
+        with open(dest) as f:
+            record = json.loads(f.readline())
+
+    if len(record["command"].encode()) > 64:
+        return Result(False, "command exceeded max_command_bytes")
+    if not record.get("command_truncated"):
+        return Result(False, "truncation not marked")
+    if record.get("command_bytes") != 10000:
+        return Result(False, "original length not recorded")
+    return Result(True, "capped at 64 bytes, truncation marked, length preserved")
+
+
+@check("audit-fail-closed-gate", "0.3.0",
+       "on_write_failure='deny' raises so an unauditable call can be refused")
+def _audit_fail_closed_gate() -> Result:
+    import contextlib
+    import io
+
+    from cli_mcp.audit import (
+        DENY,
+        AuditConfig,
+        AuditLog,
+        AuditWriteError,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "no-such-dir", "audit.jsonl")
+
+        # The sink complains to stderr on first failure — correct behaviour,
+        # and exactly what this probe provokes. Swallow it so a passing run
+        # stays quiet.
+        with contextlib.redirect_stderr(io.StringIO()) as complaints:
+            strict = AuditLog(AuditConfig(destination=dest, on_write_failure=DENY))
+            try:
+                strict.decision(call_id="c", node="n", tool="t", command="x",
+                                decision="allow")
+                raised = False
+            except AuditWriteError:
+                raised = True
+
+            lenient = AuditLog(AuditConfig(destination=dest))
+            try:
+                lenient.decision(call_id="c", node="n", tool="t", command="x",
+                                 decision="allow")
+                lenient_error = None
+            except Exception as e:  # noqa: BLE001 - reported, not swallowed
+                lenient_error = e
+
+    if not raised:
+        return Result(False, "deny posture did not raise on a failed write")
+    if lenient_error is not None:
+        return Result(False, f"continue posture raised {type(lenient_error).__name__}")
+    if lenient.dropped != 1:
+        return Result(False, f"continue posture did not count the drop ({lenient.dropped})")
+    if "AUDIT SINK FAILING" not in complaints.getvalue():
+        return Result(False, "sink failure was silent; no complaint on stderr")
+
+    return Result(True, "deny raises; continue counts the drop; both complain once")
+
+
+# --------------------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
