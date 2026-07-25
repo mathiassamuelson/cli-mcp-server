@@ -99,7 +99,13 @@ async def _kill(proc: asyncio.subprocess.Process) -> None:
     await _reap(proc)
 
 
-def _build_argv(entry: "ToolEntry", args: str) -> list[str]:
+def build_argv(entry: "ToolEntry", args: str) -> list[str]:
+    """Resolve an entry plus its args to the exact argv that will be spawned.
+
+    Public because the audit log records this, not the caller's command
+    string: the resolved argv is the thing with security meaning. Sharing one
+    function means what gets logged cannot drift from what gets executed.
+    """
     return [entry.binary, *entry.prepend_args, *shlex.split(args)]
 
 
@@ -111,7 +117,7 @@ async def run_tool(entry: "ToolEntry", args: str) -> dict:
             "error": entry.unhealthy_reason or f"Binary not found: {entry.binary_raw}",
         }
 
-    argv = _build_argv(entry, args)
+    argv = build_argv(entry, args)
     start = time.monotonic()
 
     try:
@@ -211,7 +217,7 @@ async def run_pipeline(stages: Sequence[tuple["ToolEntry", str]]) -> dict:
     try:
         prev_read: int = asyncio.subprocess.DEVNULL  # type: ignore[assignment]
         for i, (entry, args) in enumerate(stages):
-            argv = _build_argv(entry, args)
+            argv = build_argv(entry, args)
             is_last = i == len(stages) - 1
 
             if is_last:
