@@ -597,6 +597,13 @@ answer questions that cannot be settled by reading.
    friends), or Akamai-controlled code? Generic clients cannot do mTLS with a
    private CA — they expect the OAuth profile. This decides whether tier 2 and
    tier 3 must coexist on the same node.
+
+   *Working answer (tentative):* a purpose-built client is expected, either
+   here or inside Akamai. If that holds, mTLS is viable end to end and the
+   OAuth path becomes a community-facing feature rather than a deployment
+   requirement — phase 5 stays in the plan but stops being on anyone's
+   critical path. Worth re-confirming before phase 5 is scheduled, because
+   the reverse (a generic client appears later) would make it urgent.
 5. **Does the 2026-07-28 transport change land on your roadmap**, and when?
    §8 argues the auth layer should be written to survive it either way, but it
    affects sequencing.
