@@ -18,6 +18,13 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ### Added
 
+- Linting via [ruff](https://docs.astral.sh/ruff/), added to the `dev` extra
+  and CI. Configured as a linter only — check-only, no `ruff format`, no
+  format-on-save — with a deliberately tight rule set (pyflakes + logical
+  pycodestyle) that catches bugs without the diff churn a formatter or import
+  reordering would inflict on downstream patch porting. Removed five unused
+  imports it found. Replaces the `black`/`flake8` the README mentioned but the
+  project never actually configured. `[build-coupled]`
 - `docs/TESTING.md` — the test strategy for contributors and coding agents:
   the layered structure and what each layer catches, the no-mocks /
   wall-clock / absence-of-effect conventions, how the pytest suite relates to

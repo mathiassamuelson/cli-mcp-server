@@ -1,8 +1,6 @@
 """Tests for cli_mcp.cli_executor — subprocess execution."""
 
-import os
 import stat
-import tempfile
 import textwrap
 import pytest
 from cli_mcp.cli_executor import run_cli

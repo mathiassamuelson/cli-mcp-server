@@ -15,6 +15,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "httpx",
+    "ruff",
 ]
 
 [build-system]
@@ -23,6 +24,19 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["cli_mcp*"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Deliberately a linter, not a formatter. This selection is the bug-catching
+# subset only — pyflakes (F: undefined names, unused imports, bad f-strings)
+# plus the logical-error pycodestyle checks (E4/E7/E9). No whitespace rules
+# (E1/E2/E5), no import sorting (I), no pyupgrade rewrites (UP): those edit
+# files for style and would create diff churn that hurts downstream patch
+# porting (see docs/DOWNSTREAM.md) without catching bugs. Run `ruff check`;
+# there is intentionally no `ruff format` step and no format-on-save.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

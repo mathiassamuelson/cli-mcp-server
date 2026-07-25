@@ -12,7 +12,6 @@ file keeps working while `test_e2e_transport.py` needs rewriting.
 import json
 from contextlib import asynccontextmanager
 
-import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import TextContent
 

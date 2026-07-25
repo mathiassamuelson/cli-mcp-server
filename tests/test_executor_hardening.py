@@ -2,8 +2,6 @@
 kill-on-timeout, streaming output cap, sanitized env, prepend_args.
 """
 
-import asyncio
-import os
 import stat
 import textwrap
 import time

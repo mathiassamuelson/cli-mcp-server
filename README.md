@@ -339,9 +339,14 @@ asyncio.run(main())
 pip install -e ".[dev]"
 pytest                 # run tests (120)
 pytest -m "not e2e"    # skip socket-binding end-to-end tests
-black .                # format
-flake8                 # lint
+ruff check .           # lint
 ```
+
+Linting is [ruff](https://docs.astral.sh/ruff/) in **check-only** mode — it
+reports, it never rewrites files, and there is no autoformatter or
+format-on-save in this project. The enabled rules are the bug-catching subset
+(pyflakes plus logical-error pycodestyle); the reasoning is in the
+`[tool.ruff.lint]` block of `pyproject.toml`.
 
 The suite lives in `tests/` and is stratified from unit tests through live
 end-to-end tests over the real MCP transport. Because this is a

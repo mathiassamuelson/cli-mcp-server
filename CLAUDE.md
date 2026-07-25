@@ -16,6 +16,11 @@ pytest -q -m "not e2e"       # skip tests that bind a socket
 `asyncio_mode = "auto"` is set in `pyproject.toml`, so `async def test_*`
 functions need no `@pytest.mark.asyncio` decorator.
 
+Lint with `ruff check .` (CI runs it). It is a linter only — check-only, never
+`ruff format`, no format-on-save. Do not add an autoformatter: a mass reformat
+creates diff churn that breaks downstream patch porting. Rule selection and
+rationale live in the `[tool.ruff.lint]` block of `pyproject.toml`.
+
 ## This repo has private downstream forks
 
 Changes here get ported by hand into private clones that have been adapted to
