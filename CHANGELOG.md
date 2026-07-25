@@ -18,6 +18,11 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ### Added
 
+- `docs/TESTING.md` — the test strategy for contributors and coding agents:
+  the layered structure and what each layer catches, the no-mocks /
+  wall-clock / absence-of-effect conventions, how the pytest suite relates to
+  the conformance probes, a decision guide for placing a new test, and an
+  honest inventory of thin spots. Referenced from `README.md` and `CLAUDE.md`.
 - `docs/DOWNSTREAM.md` gains an "Applying upstream patches" recipe for forks
   that are unrelated-history imports with a relocated package root — the shape
   the known forks actually have. Validated against a scratch repo reproducing

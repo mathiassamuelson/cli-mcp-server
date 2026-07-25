@@ -29,6 +29,9 @@ other build systems. Two consequences for how you work:
 
 ## Test conventions
 
+Full strategy — layers, decision guide, known gaps — is in
+[docs/TESTING.md](docs/TESTING.md). The essentials:
+
 - **No mocks.** Tests spawn real subprocesses from stub scripts written to
   `tmp_path`, and load real YAML from real directories.
 - **Kill semantics are asserted on wall-clock elapsed time**, not just on the

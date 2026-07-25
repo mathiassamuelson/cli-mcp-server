@@ -336,13 +336,23 @@ asyncio.run(main())
 ## Development
 
 ```bash
-pip install -e .
-pytest                 # run tests
+pip install -e ".[dev]"
+pytest                 # run tests (120)
+pytest -m "not e2e"    # skip socket-binding end-to-end tests
 black .                # format
 flake8                 # lint
 ```
 
-The test suite lives in `tests/` and covers the glob matcher, the deny/allow filter, catalog loading and validation, pipeline parsing, and the subprocess executor.
+The suite lives in `tests/` and is stratified from unit tests through live
+end-to-end tests over the real MCP transport. Because this is a
+security-boundary server, the tests optimize for proving the allow/deny filter
+holds under adversarial input rather than for coverage percentage.
+
+See **[docs/TESTING.md](docs/TESTING.md)** for the full test strategy: the
+layers and what each catches, the no-mocks / wall-clock / absence-of-effect
+conventions, how the pytest suite relates to the dependency-free conformance
+probes, and a decision guide for where a new test belongs. Contributors and
+coding agents adding tests should start there.
 
 ---
 
