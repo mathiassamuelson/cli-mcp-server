@@ -93,10 +93,18 @@ def parse_pipeline(command: str) -> list[str]:
 
     Raises PipelineGrammarError on forbidden metacharacters, empty segments,
     or unterminated quotes.
+
+    One empty segment is legal: the sole one. An empty command means "invoke
+    the lead tool with no arguments" — `uptime`, `free`, `dmesg` — and is
+    matched against the catalog's allow patterns like any other command, so
+    the authorization decision stays with the catalog author (see
+    filter.check_command). An empty segment anywhere in a *pipeline* is still
+    malformed: `|`, `ps |`, `| grep x` and `ps | | grep` all produce two or
+    more segments and remain rejected.
     """
     segments = _scan_segments(command)
     cleaned = [s.strip() for s in segments]
-    if any(not s for s in cleaned):
+    if len(cleaned) > 1 and any(not s for s in cleaned):
         raise PipelineGrammarError("pipeline grammar: empty segment")
     return cleaned
 

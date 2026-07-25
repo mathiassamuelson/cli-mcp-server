@@ -46,9 +46,27 @@ class TestParsePipeline:
         out = parse_pipeline("grep 'a|b'")
         assert out == ["grep 'a|b'"]
 
-    def test_empty_segment_rejected(self):
+    @pytest.mark.parametrize("malformed", [
+        "ps aux | | head",
+        "|",
+        "ps aux |",
+        "| head",
+        "ps aux |  | head",
+    ])
+    def test_empty_segment_rejected_in_a_pipeline(self, malformed):
         with pytest.raises(PipelineGrammarError, match="empty"):
-            parse_pipeline("ps aux | | head")
+            parse_pipeline(malformed)
+
+    @pytest.mark.parametrize("command", ["", "   ", "\t"])
+    def test_empty_command_is_the_one_legal_empty_segment(self, command):
+        """An empty command means "invoke the lead tool with no arguments".
+
+        Legitimate for `uptime`, `free`, `dmesg`. It is passed through to be
+        matched against the catalog's allow patterns like any other command,
+        so the authorization decision stays with the catalog author — this
+        parser must not pre-empt it.
+        """
+        assert parse_pipeline(command) == [""]
 
     @pytest.mark.parametrize(
         "bad",

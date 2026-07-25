@@ -40,6 +40,12 @@ def stub_env(tmp_path, monkeypatch):
                   - "destroy*"
                 allow:
                   - "ok*"
+            - name: bare
+              description: Tool invoked with no arguments.
+              binary: fakebin
+              timeout_seconds: 5
+              rules:
+                allow: ["*"]
             - name: missing
               description: Missing tool.
               binary: not-installed
@@ -67,7 +73,7 @@ def stub_env(tmp_path, monkeypatch):
 async def test_list_tools_from_catalog(stub_env):
     tools = await srv.list_tools()
     names = sorted(t.name for t in tools)
-    assert names == ["fake", "missing"]
+    assert names == ["bare", "fake", "missing"]
     fake = next(t for t in tools if t.name == "fake")
     assert fake.description == "Fake tool."
     assert "command" in fake.inputSchema["properties"]
@@ -106,3 +112,40 @@ async def test_call_tool_unhealthy(stub_env):
     assert payload["status"] == "error"
     assert "unavailable" in payload["error"].lower()
     assert "not-installed" in payload["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["", "   "])
+async def test_call_tool_with_no_arguments(stub_env, command):
+    """`uptime`, `free`, `dmesg` — tools whose normal invocation is bare.
+
+    check_command has accepted the empty command since 0.2.0, but the layer
+    above it did not: parse_pipeline rejected "" as an empty segment, so the
+    fix was unreachable through call_tool and no argument-less tool worked.
+    The unit test for check_command passed the whole time, which is exactly
+    why this assertion belongs at the server layer.
+    """
+    out = await srv.call_tool("bare", {"command": command})
+    payload = json.loads(out[0]["text"])
+    assert payload["status"] == "success"
+    assert payload["result"]["argv"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_arguments_still_obeys_the_allow_rules(stub_env):
+    """Passing "" through the parser hands the decision to the catalog
+    author; it does not grant anything. `fake` allows only "ok*"."""
+    out = await srv.call_tool("fake", {"command": ""})
+    payload = json.loads(out[0]["text"])
+    assert payload["status"] == "denied"
+    assert "does not match any allow rule" in payload["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", ["|", "ok |", "| bare", "ok | | bare"])
+async def test_malformed_pipelines_still_rejected(stub_env, malformed):
+    """Allowing the sole empty segment must not weaken pipeline grammar."""
+    out = await srv.call_tool("fake", {"command": malformed})
+    payload = json.loads(out[0]["text"])
+    assert payload["status"] == "denied"
+    assert "empty segment" in payload["error"]

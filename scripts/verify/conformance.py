@@ -205,6 +205,41 @@ def _pipeline_truncation() -> Result:
 # 0.3.0
 # --------------------------------------------------------------------------
 
+@check("empty-args-reach-the-filter", "0.3.0",
+       "parse_pipeline passes an empty command through instead of rejecting it")
+def _empty_args_reach_the_filter() -> Result:
+    """Companion to the 0.2.0 empty-args check, one layer up.
+
+    That check tested check_command directly and passed the whole time, while
+    parse_pipeline rejected "" as an empty segment before the filter was ever
+    reached — so no argument-less tool worked through call_tool. A fork can
+    hold the 0.2.0 fix and still have the bug; this is what tells them apart.
+    """
+    from cli_mcp.pipeline import PipelineGrammarError, parse_pipeline
+
+    for command in ("", "   "):
+        try:
+            segments = parse_pipeline(command)
+        except PipelineGrammarError as e:
+            return Result(False, f"parse_pipeline({command!r}) rejected it: {e}")
+        if segments != [""]:
+            return Result(False, f"parse_pipeline({command!r}) gave {segments!r}, want ['']")
+
+    # Allowing the sole empty segment must not weaken pipeline grammar.
+    malformed = ["|", "ps |", "| head", "ps | | head"]
+    leaked = []
+    for command in malformed:
+        try:
+            parse_pipeline(command)
+            leaked.append(command)
+        except PipelineGrammarError:
+            pass
+    if leaked:
+        return Result(False, f"malformed pipeline accepted: {', '.join(repr(m) for m in leaked)}")
+
+    return Result(True, "empty command passes through; malformed pipelines still rejected")
+
+
 @check("audit-denial-recorded", "0.3.0",
        "a denied call writes a decision record and never an outcome record")
 def _audit_denial_recorded() -> Result:

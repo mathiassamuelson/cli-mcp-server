@@ -67,6 +67,19 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
   the known forks actually have. Validated against a scratch repo reproducing
   it, from 5/5 conformance probes failing to 5/5 passing.
 
+### Fixed
+
+- Argument-less tool invocation works through `call_tool`. The 0.2.0 fix that
+  let `check_command` accept an empty command was unreachable: `parse_pipeline`
+  rejected `""` as an empty segment one layer above the filter, so no tool
+  could be invoked bare — `uptime`, `free`, `dmesg` — whatever its allow
+  rules. An empty segment is now legal when it is the *sole* segment; `|`,
+  `ps |`, `| head` and `ps | | head` all still produce two or more segments
+  and remain rejected. A fork holding 0.2.0 has this bug and its `empty-args`
+  probe passes anyway, which is why the new `empty-args-reach-the-filter`
+  probe tests through `parse_pipeline` instead of `check_command`.
+  `[security-boundary]` `[behavior-change]`
+
 ### Changed
 
 - CI uses `actions/checkout@v5` and `actions/setup-python@v6`. The v4/v5

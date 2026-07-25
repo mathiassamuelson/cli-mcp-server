@@ -398,7 +398,7 @@ The active posture is included in the `startup` record, so it is not an invisibl
 
 ```bash
 pip install -e ".[dev]"
-pytest                 # run tests (169)
+pytest                 # run tests (183)
 pytest -m "not e2e"    # skip socket-binding end-to-end tests
 ruff check .           # lint
 ```
