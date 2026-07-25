@@ -70,6 +70,14 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
   certificate-derived principals for closed deployments alongside a
   spec-conformant OAuth 2.1 Resource Server path. Records what the MCP
   `2026-07-28` revision changes for it.
+- `docs/proposals/privileged-execution.md` — design proposal for running
+  root-requiring commands from an unprivileged server. Nothing implemented; no
+  behaviour change. Compares sudo-with-wrappers, a setuid helper, a privileged
+  helper daemon, and Linux capabilities; recommends eliminating the need
+  first, then capabilities, then sudo with per-operation wrappers. Records the
+  finding that the executor's timeout and byte-cap kill guarantees do not
+  cross the privilege boundary — an unprivileged process cannot signal a root
+  child, and `_signal_kill` catches only `ProcessLookupError` today.
 - `docs/DOWNSTREAM.md` gains an "Applying upstream patches" recipe for forks
   that are unrelated-history imports with a relocated package root — the shape
   the known forks actually have. Validated against a scratch repo reproducing
