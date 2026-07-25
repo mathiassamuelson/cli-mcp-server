@@ -131,6 +131,7 @@ YAML file with two sections:
 | `catalog.path` | Directory holding tool entry YAML files. |
 | `catalog.search_paths` | Where to resolve bare binary names. Never falls back to `$PATH`. |
 | `catalog.defaults` | Optional defaults applied to every tool entry (e.g. a default `timeout_seconds`). |
+| `audit.*` | Audit log settings. See [Audit logging](#audit-logging). Omitting the section enables auditing to stderr with defaults. |
 
 ### Config file lookup
 
@@ -333,11 +334,71 @@ asyncio.run(main())
 
 ---
 
+## Audit logging
+
+Every tool call is recorded. Records are JSON Lines, written to `stderr` by default (journald picks them up under a systemd unit) or to an absolute path — see the `audit:` block in [`configs/example.yaml`](configs/example.yaml).
+
+### Two records per call
+
+A call emits a **`decision`** record *before* the subprocess is spawned, and an **`outcome`** record after it finishes:
+
+```json
+{"ts":"2026-07-24T10:15:02.113Z","event":"decision","call_id":"9f2c…","node":"dns-node-a",
+ "tool":"ps","command":"aux | grep -e nginx","decision":"deny",
+ "reason":"segment 1 (grep): Command matches deny rule: * -e *",
+ "principal":{"authenticated":false,"transport":"sse","connection":"41ab…","peer":"10.0.0.4"}}
+```
+
+```json
+{"ts":"2026-07-24T10:15:02.119Z","event":"outcome","call_id":"9f2c…","node":"dns-node-a",
+ "status":"success","exit_code":0,"execution_time_ms":42}
+```
+
+Writing the decision first is deliberate: a call that wedges or takes the process down still leaves proof that it was authorized and started.
+
+A one-time **`startup`** record is written when the catalog loads, listing every tool with its resolved binary and its verbatim allow/deny patterns. It makes the log self-describing — you can answer "what was this node permitting when that call came in" without recovering the config file as it existed then.
+
+### Joining the two — read this before writing queries
+
+The join key is **`(node, call_id)`**, present on both records.
+
+**It is an outer join by design.** A refused call writes a `decision` and *never* an `outcome`. That asymmetry is the point: the absence of an outcome record bearing a given `call_id` is what proves the subprocess never ran. A query that inner-joins, or that filters out unmatched decisions as a data-quality problem, discards precisely the security events you built this for.
+
+### What is deliberately not recorded
+
+- **Subprocess stdout and stderr, ever — including on failure.** Tool output is arbitrary system data and belongs to a different retention and access class than an audit trail. The outcome record says *that* a call failed and its exit code; the failure text goes to the caller only.
+- **Proxy headers.** `X-Forwarded-For` and friends are caller-supplied. Trusting them would let a caller choose what the audit log says about them. `peer` is the transport-level address.
+- **Commands beyond `max_command_bytes`**, which are truncated and marked with `command_truncated` plus the original `command_bytes`.
+
+### Caller attribution, and its limits
+
+Connections are unauthenticated, so `principal.authenticated` is always `false` today. The field is present from day one so that adding auth is a value change rather than a schema change, and so an absent field can never be read as a trusted caller.
+
+Two limits worth stating plainly rather than discovering later:
+
+- **Attribution is connection-scoped, not request-scoped.** A tool call does not execute in the task of the POST that carried it — the message is handed to the SSE session's stream and the handler runs inside `mcp_server.run()`. Per-connection facts (peer address, the connection's `User-Agent`) are available; per-request ones are not.
+- **This log establishes what the server did, not who asked it to.** With unauthenticated connections and the default fail-open posture, it is a strong operational record and *not* a tamper-evident audit trail: anyone who can fill the destination disk can make it lossy. Both limits close the same way — when authentication lands.
+
+### When the sink fails
+
+`on_write_failure` controls it:
+
+| Value | Behaviour |
+|---|---|
+| `continue` (default) | The call runs. The drop is counted and rides along on the next record that lands, as `audit_dropped`, so loss stays visible in the log itself. One complaint goes to stderr on first failure, then silence — a per-call complaint would fill the remaining disk. |
+| `deny` | The call is refused before anything is spawned; the caller gets `status: error`. |
+
+`deny` gates **execution**. Once a subprocess has run, a failed *outcome* write is always counted rather than raised — converting a real result into a refusal would report a falsehood to the caller.
+
+The active posture is included in the `startup` record, so it is not an invisible property of the deployment.
+
+---
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                 # run tests (120)
+pytest                 # run tests (169)
 pytest -m "not e2e"    # skip socket-binding end-to-end tests
 ruff check .           # lint
 ```

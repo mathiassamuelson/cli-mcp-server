@@ -11,6 +11,32 @@ server:
   port: 8100
   node_name: "dns-node-a"    # Change per node
 
+audit:
+  # Every tool call writes a `decision` record before the subprocess is
+  # spawned and an `outcome` record after, joined on (node, call_id).
+  # A refused call writes a decision and never an outcome — see
+  # "Audit logging" in README.md before writing queries against this.
+  enabled: true
+
+  # "stderr" (journald picks it up under the systemd unit) or an absolute
+  # path. A file destination is opened per record, so rotation by rename
+  # needs no SIGHUP.
+  destination: "stderr"
+
+  # Commands are caller-supplied and unbounded; longer ones are truncated
+  # and marked. An audit log that can be flooded by one call is one that
+  # can be used to hide the next.
+  max_command_bytes: 4096
+
+  # What to do when a record cannot be written.
+  #   continue — run the call anyway, count the drop, complain once (default)
+  #   deny     — refuse the call; nothing executes unaudited
+  # Ships "continue": these are diagnostic tools, and losing them mid-incident
+  # because a disk filled is usually the worse failure. Whichever you pick is
+  # recorded in the startup record so it is not an invisible property of the
+  # deployment.
+  on_write_failure: "continue"
+
 catalog:
   path: "/etc/cli-mcp-server/catalog/"
   search_paths:

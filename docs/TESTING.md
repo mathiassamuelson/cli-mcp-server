@@ -174,3 +174,15 @@ Honest inventory, so nobody mistakes green for complete:
   given that their disagreement is a bypass primitive.
 - **Config precedence** (`CLI_MCP_CONFIG` → `~/.config` → `/etc`) in
   `load_config` is documented but untested.
+- **Audit writes are synchronous, and nothing tests what happens when the
+  sink blocks.** A hung filesystem (NFS, a full disk mid-write) stalls the
+  event loop for every in-flight call, not just the one being logged. The
+  trade was taken deliberately — ordered records, no loss window, no drain
+  task, at a call volume that is human- or agent-paced rather than high-QPS —
+  but the failure mode is untested because provoking it portably is hard. If
+  this moves to a bounded queue, the test to write first is the one asserting
+  what happens when the queue fills.
+- **Audit records are asserted per call, not under concurrency.** The suite
+  checks that interleaved records stay separable by `call_id`
+  (`test_audit.py`), but nothing drives simultaneous calls through a live
+  server and checks the log afterwards.

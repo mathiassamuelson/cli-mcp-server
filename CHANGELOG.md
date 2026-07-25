@@ -18,6 +18,38 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ### Added
 
+- **Audit logging of every tool call.** The filter's decisions were previously
+  unrecorded: the only evidence a call happened was the response envelope,
+  held entirely by the party you would want to audit. Each call now emits a
+  `decision` record *before* the subprocess is spawned and an `outcome` record
+  after, as JSON Lines, joined on `(node, call_id)`. A refused call emits a
+  decision and never an outcome — absence of an outcome record is what proves
+  the subprocess did not run, and consumers must treat the join as an outer
+  join. A one-time `startup` record lists every tool with its resolved binary
+  and verbatim allow/deny patterns, so the log is self-describing. New
+  `cli_mcp/audit.py`; new `audit:` config block (defaults to stderr, so an
+  existing config keeps working with no edit). Subprocess stdout/stderr is
+  never recorded, not even on error. See "Audit logging" in `README.md`.
+  `[behavior-change]` `[build-coupled]`
+- `cli_executor.build_argv` is now public (was `_build_argv`). The audit log
+  records the resolved argv, and sharing one function with the executor is
+  what stops what is logged from drifting from what is spawned. `[api-change]`
+
+#### Known limitations, stated rather than discovered
+
+- Caller attribution is **connection-scoped, not request-scoped**. A tool call
+  does not run in the task of the POST that carried it, so per-request facts
+  are not reachable without patching the transport.
+- Connections remain unauthenticated, so `principal.authenticated` is always
+  `false`. The field ships now so that adding auth is a value change rather
+  than a schema change.
+- With the default `on_write_failure: continue`, the log is a strong
+  operational record but **not tamper-evident**: filling the destination disk
+  makes it lossy. Drops are counted and surface as `audit_dropped` on the next
+  record that lands.
+- Writes are synchronous, so a hung filesystem stalls the event loop. See
+  "Known thin spots" in `docs/TESTING.md`.
+
 - Linting via [ruff](https://docs.astral.sh/ruff/), added to the `dev` extra
   and CI. Configured as a linter only — check-only, no `ruff format`, no
   format-on-save — with a deliberately tight rule set (pyflakes + logical
