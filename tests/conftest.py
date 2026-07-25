@@ -4,6 +4,7 @@ Everything is built under `tmp_path` so these fixtures carry across forks
 with different repo layouts — see CLAUDE.md.
 """
 
+import json
 import socket
 import stat
 import textwrap
@@ -15,6 +16,19 @@ import pytest
 import uvicorn
 
 from cli_mcp import server as srv
+
+
+@pytest.fixture(autouse=True)
+def _isolate_audit_sink(monkeypatch):
+    """Keep the audit sink from leaking between tests.
+
+    `AUDIT` is a lazily-built global keyed off `CONFIG`. Without this, a test
+    that configures a file destination leaves the next test writing into a
+    torn-down tmp_path, which is order-dependent and silent.
+    """
+    monkeypatch.setattr(srv, "AUDIT", None)
+    yield
+    monkeypatch.setattr(srv, "AUDIT", None)
 
 
 @pytest.fixture
@@ -64,14 +78,40 @@ def e2e_config(tmp_path, monkeypatch):
             allow: ["*"]
     """))
 
+    # Audit goes to a real file under tmp_path rather than the default stderr,
+    # so tests read back what a deployment would actually have written.
+    audit_path = tmp_path / "audit.jsonl"
+
     cfg = {
         "server": {"host": "127.0.0.1", "port": 0, "node_name": "e2e-node"},
         "catalog": {"path": str(catalog), "search_paths": [str(bin_dir)]},
+        "audit": {"destination": str(audit_path)},
     }
     monkeypatch.setattr(srv, "CONFIG", cfg)
     monkeypatch.setattr(srv, "REGISTRY", None)
+    monkeypatch.setattr(srv, "AUDIT", None)
+    cfg["_audit_path"] = audit_path
     yield cfg
     monkeypatch.setattr(srv, "REGISTRY", None)
+    monkeypatch.setattr(srv, "AUDIT", None)
+
+
+@pytest.fixture
+def audit_records(e2e_config):
+    """Read back the audit log written by the server under test."""
+    path = e2e_config["_audit_path"]
+
+    def read(event: str | None = None) -> list[dict]:
+        if not path.exists():
+            return []
+        records = [
+            json.loads(line)
+            for line in path.read_text().splitlines()
+            if line.strip()
+        ]
+        return [r for r in records if event is None or r["event"] == event]
+
+    return read
 
 
 def _free_port() -> int:

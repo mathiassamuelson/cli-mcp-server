@@ -63,3 +63,48 @@ async def test_denial_over_transport(live_server):
             await session.initialize()
             result = await session.call_tool("fake", {"command": "destroy all"})
             assert json.loads(result.content[0].text)["status"] == "denied"
+
+
+async def test_audit_principal_over_transport(live_server, audit_records):
+    """Caller attribution survives the trip from handle_sse to call_tool.
+
+    Nothing in the in-process suites can catch a regression here. A tool call
+    does not run in the POST request's task, so the ContextVar carrying the
+    principal has to be set on the SSE connection and inherited by the task
+    group inside mcp_server.run(). Only a real transport exercises that.
+    """
+    async with sse_client(f"{live_server}/mcp") as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            await session.call_tool("fake", {"command": "ok hi"})
+
+    decision = audit_records("decision")[0]
+    principal = decision["principal"]
+
+    assert principal["transport"] == "sse"
+    assert principal["peer"] == "127.0.0.1"
+    assert principal["connection"]
+    # Present and explicitly false: connections are unauthenticated, and an
+    # absent field must never be readable as a trusted caller.
+    assert principal["authenticated"] is False
+
+
+async def test_audit_attributes_calls_to_their_own_connection(live_server, audit_records):
+    """Two clients must not be conflated. Connection-scoped attribution means
+    each call carries the id of the connection it arrived on."""
+    async with sse_client(f"{live_server}/mcp") as (read_a, write_a):
+        async with ClientSession(read_a, write_a) as session_a:
+            await session_a.initialize()
+            await session_a.call_tool("fake", {"command": "ok from-a"})
+
+    async with sse_client(f"{live_server}/mcp") as (read_b, write_b):
+        async with ClientSession(read_b, write_b) as session_b:
+            await session_b.initialize()
+            await session_b.call_tool("fake", {"command": "ok from-b"})
+
+    decisions = audit_records("decision")
+    by_command = {d["command"]: d for d in decisions}
+
+    conn_a = by_command["ok from-a"]["principal"]["connection"]
+    conn_b = by_command["ok from-b"]["principal"]["connection"]
+    assert conn_a != conn_b

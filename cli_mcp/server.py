@@ -18,9 +18,17 @@ from starlette.applications import Starlette
 from starlette.routing import Mount, Route
 from starlette.responses import JSONResponse
 
+from .audit import (
+    PRINCIPAL,
+    AuditLog,
+    AuditWriteError,
+    connection_principal,
+    new_call_id,
+    parse_audit_config,
+)
 from .catalog import load_catalog, ToolRegistry
 from .filter import check_command, check_paths
-from .cli_executor import run_tool, run_pipeline
+from .cli_executor import build_argv, run_tool, run_pipeline
 from .pipeline import (
     parse_pipeline,
     resolve_pipeline,
@@ -51,6 +59,7 @@ def load_config() -> dict:
 
 CONFIG: dict | None = None
 REGISTRY: ToolRegistry | None = None
+AUDIT: AuditLog | None = None
 mcp_server = Server("cli-mcp-server")
 sse_transport = SseServerTransport("/messages/")
 
@@ -62,15 +71,64 @@ def get_config() -> dict:
     return CONFIG
 
 
+def get_audit() -> AuditLog:
+    global AUDIT
+    if AUDIT is None:
+        AUDIT = AuditLog(parse_audit_config(get_config().get("audit")))
+    return AUDIT
+
+
+def _startup_tools(registry: ToolRegistry) -> list[dict]:
+    """The permitted surface, as the startup record describes it.
+
+    Rule patterns are recorded verbatim rather than counted: the question this
+    answers is "what was this node permitting when that call came in", and a
+    count cannot answer it.
+    """
+    tools = []
+    for e in registry:
+        tool = {
+            "name": e.name,
+            "binary_raw": e.binary_raw,
+            "binary": e.binary,
+            "healthy": e.healthy,
+            "pipe_stage": e.pipe_stage,
+            "timeout_seconds": e.timeout_seconds,
+            "max_bytes": e.max_bytes,
+            "allow": e.rules.get("allow", []),
+            "deny": e.rules.get("deny", []),
+            "path_deny": e.path_deny,
+        }
+        if not e.healthy:
+            tool["unhealthy_reason"] = e.unhealthy_reason
+        tools.append(tool)
+    return tools
+
+
 def get_registry() -> ToolRegistry:
     global REGISTRY
     if REGISTRY is None:
         cat_cfg = get_config().get("catalog") or {}
+        catalog_path = cat_cfg.get("path", "/etc/cli-mcp-server/catalog/")
         REGISTRY = load_catalog(
-            cat_cfg.get("path", "/etc/cli-mcp-server/catalog/"),
+            catalog_path,
             defaults=cat_cfg.get("defaults") or {},
             search_paths=cat_cfg.get("search_paths") or DEFAULT_SEARCH_PATHS,
         )
+        # Emitted once per load, so the log is self-describing: a reader can
+        # answer what was permitted at the time of a call without recovering
+        # the config file as it existed then.
+        try:
+            get_audit().startup(
+                node=get_config()["server"]["node_name"],
+                catalog_path=str(catalog_path),
+                tools=_startup_tools(REGISTRY),
+            )
+        except AuditWriteError:
+            # Refusing to serve because the startup record did not land would
+            # take the node down for a logging fault. The per-call gate is
+            # what enforces the deny posture; see call_tool.
+            pass
     return REGISTRY
 
 
@@ -107,61 +165,117 @@ async def list_tools():
     ]
 
 
+def _audit_stages(stages) -> list[dict]:
+    """The resolved argv for each stage, as the audit log records it.
+
+    Built with the executor's own build_argv so what is logged cannot drift
+    from what is spawned. A stage whose args will not tokenize is recorded as
+    such rather than omitted — a hole in the record is worse than an ugly one.
+    """
+    recorded = []
+    for entry, args in stages:
+        try:
+            recorded.append({"tool": entry.name, "argv": build_argv(entry, args)})
+        except ValueError as e:
+            recorded.append({"tool": entry.name, "argv_error": str(e)})
+    return recorded
+
+
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: dict):
     config = get_config()
     node_name = config["server"]["node_name"]
     registry = get_registry()
-
-    entry = registry.get(name)
-    if entry is None:
-        return _envelope(node_name, name, None, status="error", error=f"Unknown tool: {name}")
+    audit = get_audit()
 
     command = arguments.get("command", "")
+    call_id = new_call_id()
 
-    if not entry.healthy:
+    def record(decision: str, reason: str | None = None, stages=None) -> None:
+        """Write the decision record. Raises AuditWriteError under the deny
+        posture, which the caller converts into a refusal."""
+        audit.decision(
+            call_id=call_id,
+            node=node_name,
+            tool=name,
+            command=command,
+            decision=decision,
+            reason=reason,
+            stages=_audit_stages(stages) if stages is not None else None,
+        )
+
+    def denied(reason: str, status: str = "denied"):
+        record("deny" if status == "denied" else "error", reason)
+        return _envelope(node_name, name, command, status=status, error=reason)
+
+    try:
+        entry = registry.get(name)
+        if entry is None:
+            return denied(f"Unknown tool: {name}", status="error")
+
+        if not entry.healthy:
+            return denied(
+                f"Tool unavailable on this node: {entry.unhealthy_reason}",
+                status="error",
+            )
+
+        try:
+            segments = parse_pipeline(command)
+        except PipelineGrammarError as e:
+            return denied(str(e))
+
+        try:
+            stages = resolve_pipeline(entry, segments, registry)
+        except PipelineResolutionError as e:
+            return denied(str(e))
+
+        for i, (seg_entry, seg_args) in enumerate(stages):
+            if not seg_entry.healthy:
+                return denied(
+                    f"segment {i} ({seg_entry.name}): {seg_entry.unhealthy_reason}",
+                    status="error",
+                )
+            allowed, reason = check_command(seg_args, seg_entry.rules)
+            if not allowed:
+                return denied(f"segment {i} ({seg_entry.name}): {reason}")
+            ok, preason = check_paths(seg_args, seg_entry.path_deny)
+            if not ok:
+                return denied(f"segment {i} ({seg_entry.name}): {preason}")
+
+        # Written before the subprocess is spawned, on purpose: a call that
+        # wedges or takes the process down still leaves proof it was
+        # authorized and started.
+        record("allow", stages=stages)
+
+    except AuditWriteError as e:
+        # on_write_failure='deny'. Nothing has been spawned at any point that
+        # can raise here, so refusing is truthful: the command did not run.
         return _envelope(
             node_name, name, command,
             status="error",
-            error=f"Tool unavailable on this node: {entry.unhealthy_reason}",
+            error=f"call refused: audit sink unavailable ({e})",
         )
-
-    try:
-        segments = parse_pipeline(command)
-    except PipelineGrammarError as e:
-        return _envelope(node_name, name, command, status="denied", error=str(e))
-
-    try:
-        stages = resolve_pipeline(entry, segments, registry)
-    except PipelineResolutionError as e:
-        return _envelope(node_name, name, command, status="denied", error=str(e))
-
-    for i, (seg_entry, seg_args) in enumerate(stages):
-        if not seg_entry.healthy:
-            return _envelope(
-                node_name, name, command,
-                status="error",
-                error=f"segment {i} ({seg_entry.name}): {seg_entry.unhealthy_reason}",
-            )
-        allowed, reason = check_command(seg_args, seg_entry.rules)
-        if not allowed:
-            return _envelope(
-                node_name, name, command,
-                status="denied",
-                error=f"segment {i} ({seg_entry.name}): {reason}",
-            )
-        ok, preason = check_paths(seg_args, seg_entry.path_deny)
-        if not ok:
-            return _envelope(
-                node_name, name, command,
-                status="denied",
-                error=f"segment {i} ({seg_entry.name}): {preason}",
-            )
 
     if len(stages) == 1:
         result = await run_tool(entry, command)
     else:
         result = await run_pipeline(stages)
+
+    try:
+        audit.outcome(
+            call_id=call_id,
+            node=node_name,
+            status=result.get("status", "unknown"),
+            exit_code=result.get("exit_code"),
+            execution_time_ms=result.get("execution_time_ms"),
+            truncated=result.get("truncated"),
+        )
+    except AuditWriteError:
+        # The deny posture gates *execution*. The subprocess has already run,
+        # so converting a real result into a refusal would report a falsehood
+        # to the caller; the drop is counted instead and surfaces on the next
+        # record that lands.
+        pass
 
     result["node"] = node_name
     result["tool"] = name
@@ -170,6 +284,16 @@ async def call_tool(name: str, arguments: dict):
 
 
 async def handle_sse(scope, receive, send):
+    # Caller attribution must be established HERE, not in handle_messages.
+    # A tool call does not execute in the POST request's task: the message is
+    # handed to this session's stream and the handler runs in the task group
+    # inside mcp_server.run(), below. anyio tasks inherit context at spawn, so
+    # a ContextVar set here reaches call_tool and one set in handle_messages
+    # does not. Attribution is therefore connection-scoped.
+    #
+    # When authentication lands it slots in at this same point:
+    # connect_sse already reads scope["user"] and checks AuthenticatedUser.
+    PRINCIPAL.set(connection_principal(scope))
     async with sse_transport.connect_sse(scope, receive, send) as streams:
         await mcp_server.run(
             streams[0], streams[1], mcp_server.create_initialization_options()
