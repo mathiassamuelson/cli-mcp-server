@@ -62,6 +62,14 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
   wall-clock / absence-of-effect conventions, how the pytest suite relates to
   the conformance probes, a decision guide for placing a new test, and an
   honest inventory of thin spots. Referenced from `README.md` and `CLAUDE.md`.
+- `docs/proposals/authn-authz.md` — design proposal for authentication,
+  authorization, and transport security. Nothing implemented; no behaviour
+  change. Compares an NGINX front end against building it into the server,
+  recommends splitting by concern (proxy terminates mTLS, the server owns
+  principal extraction and policy), and specifies an mTLS backend with
+  certificate-derived principals for closed deployments alongside a
+  spec-conformant OAuth 2.1 Resource Server path. Records what the MCP
+  `2026-07-28` revision changes for it.
 - `docs/DOWNSTREAM.md` gains an "Applying upstream patches" recipe for forks
   that are unrelated-history imports with a relocated package root — the shape
   the known forks actually have. Validated against a scratch repo reproducing
