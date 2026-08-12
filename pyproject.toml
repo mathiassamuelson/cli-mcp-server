@@ -3,7 +3,13 @@ name = "cli-mcp-server"
 version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp",
+    # Upper bound is load-bearing, not caution. mcp 2.0.0 removed the low-level
+    # `Server.list_tools()` / `call_tool()` decorators and the SSE transport
+    # (`mcp.server.sse.SseServerTransport`) that `cli_mcp/server.py` is built
+    # on. Unpinned, a fresh install resolves to 2.x and fails at import --
+    # `AttributeError: 'Server' object has no attribute 'list_tools'` -- before
+    # any config or catalog is read. Moving to 2.x is a port, not a bump.
+    "mcp>=1,<2",
     "pyyaml",
     "starlette",
     "uvicorn",

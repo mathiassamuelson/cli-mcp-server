@@ -16,6 +16,19 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- `mcp` is pinned `>=1,<2`. It was unpinned, and mcp 2.0.0 removed the
+  low-level `Server.list_tools()` / `call_tool()` decorators and the SSE
+  transport `cli_mcp/server.py` is built on, so any fresh install — including
+  every CI run, which installs unpinned into a clean environment — resolved to
+  2.x and died at import with `AttributeError: 'Server' object has no
+  attribute 'list_tools'`, before reading any config or catalog. Existing
+  deployments with a populated venv were unaffected until reinstalled, which
+  is why this surfaced at install time rather than as a failing test. Support
+  for 2.x is a port of the server's transport layer, not a version bump.
+  `[build-coupled]`
+
 ### Added
 
 - Linting via [ruff](https://docs.astral.sh/ruff/), added to the `dev` extra
