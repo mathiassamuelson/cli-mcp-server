@@ -202,6 +202,120 @@ def _pipeline_truncation() -> Result:
 
 
 # --------------------------------------------------------------------------
+# 0.3.0
+# --------------------------------------------------------------------------
+
+class _Headers:
+    """Minimal stand-in for starlette's Headers: case-insensitive getlist.
+
+    Hand-rolled so this file keeps its stdlib-only promise.
+    """
+
+    def __init__(self, pairs):
+        self._pairs = [(k.lower(), v) for k, v in pairs]
+
+    def getlist(self, name):
+        return [v for k, v in self._pairs if k == name.lower()]
+
+
+@check("identity-refuses-empty", "0.3.0",
+       "an empty forwarded identity is a refusal, never recorded as a value")
+def _identity_refuses_empty() -> Result:
+    from cli_mcp.identity import IdentityConfig, IdentityRefused, resolve_identity
+
+    cfg = IdentityConfig(header="X-Id", require=True)
+
+    for label, pairs in [
+        ("absent", []),
+        ("empty", [("X-Id", "")]),
+        ("blank", [("X-Id", "   ")]),
+    ]:
+        try:
+            got = resolve_identity(_Headers(pairs), cfg)
+        except IdentityRefused:
+            continue
+        return Result(False, f"{label} identity resolved to {got!r} instead of refusing")
+
+    if resolve_identity(_Headers([("X-Id", "a@b.com")]), cfg) != "a@b.com":
+        return Result(False, "a present identity did not resolve")
+
+    return Result(True, "absent/empty/blank all refused; present resolves")
+
+
+@check("identity-proxy-secret", "0.3.0",
+       "a wrong or missing proxy secret is refused before identity is read")
+def _identity_proxy_secret() -> Result:
+    from cli_mcp.identity import IdentityConfig, IdentityRefused, resolve_identity
+
+    cfg = IdentityConfig(
+        header="X-Id", require=True, proxy_header="X-Proxy", proxy_secret="right"
+    )
+
+    for label, pairs in [
+        ("missing", [("X-Id", "a@b.com")]),
+        ("wrong", [("X-Id", "a@b.com"), ("X-Proxy", "wrong")]),
+        ("empty", [("X-Id", "a@b.com"), ("X-Proxy", "")]),
+    ]:
+        try:
+            resolve_identity(_Headers(pairs), cfg)
+        except IdentityRefused:
+            continue
+        return Result(False, f"{label} proxy secret was accepted")
+
+    ok = resolve_identity(_Headers([("X-Id", "a@b.com"), ("X-Proxy", "right")]), cfg)
+    if ok != "a@b.com":
+        return Result(False, f"correct secret did not resolve identity: {ok!r}")
+
+    return Result(True, "missing/wrong/empty secret refused; correct one passes")
+
+
+@check("identity-duplicate-header", "0.3.0",
+       "a repeated identity header is refused rather than resolved to one value")
+def _identity_duplicate_header() -> Result:
+    from cli_mcp.identity import IdentityConfig, IdentityRefused, resolve_identity
+
+    cfg = IdentityConfig(header="X-Id", require=True)
+    pairs = [("X-Id", "real@b.com"), ("X-Id", "forged@b.com")]
+    try:
+        got = resolve_identity(_Headers(pairs), cfg)
+    except IdentityRefused:
+        return Result(True, "duplicate identity header refused")
+    return Result(False, f"duplicate header resolved to {got!r}")
+
+
+@check("identity-misconfig-refuses-load", "0.3.0",
+       "an unset proxy-secret env var stops config load instead of accepting all")
+def _identity_misconfig() -> Result:
+    from cli_mcp.identity import IdentityConfig, IdentityMisconfigured
+
+    var = "CLI_MCP_CONFORMANCE_SECRET"
+    os.environ.pop(var, None)
+    block = {
+        "identity": {
+            "header": "X-Id",
+            "proxy_header": "X-Proxy",
+            "proxy_secret_env": var,
+        }
+    }
+    try:
+        IdentityConfig.from_config(block)
+    except IdentityMisconfigured:
+        pass
+    else:
+        return Result(False, "unset secret env var loaded without complaint")
+
+    os.environ[var] = "s3cret"
+    try:
+        cfg = IdentityConfig.from_config(block)
+        if cfg.proxy_secret != "s3cret":
+            return Result(False, "secret not read from the environment")
+    finally:
+        os.environ.pop(var, None)
+
+    return Result(True, "unset secret refuses to load; set secret is read")
+
+
+# --------------------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
