@@ -7,9 +7,25 @@
 # additional tools — no code change required.
 
 server:
-  host: "0.0.0.0"
-  port: 8100
   node_name: "dns-node-a"    # Change per node
+
+  # NOTE: the bind address is NOT configured here. `cli_mcp.server` reads only
+  # `node_name` and `identity` from this block -- it is an ASGI app and uvicorn
+  # does the binding, from the arguments in `bin/server.sh`. Earlier versions
+  # of this file carried `host:` and `port:` keys that nothing read, so editing
+  # them to move the bind was a change that appeared to work and did not.
+  # Set HOST/PORT, UDS, or use systemd socket activation. See README.
+
+  # Forwarded identity, for deployments behind an authenticating proxy. Omit
+  # the whole block and identity is null everywhere, which is the behaviour of
+  # every release before 0.3.0.
+  #
+  # identity:
+  #   header: "X-Auth-Request-Email"   # the proxy must set this on EVERY route
+  #   require: true                    # empty => 403, never recorded "unknown"
+  #   proxy_header: "X-Trail-Proxy"    # proves the request came via the proxy
+  #   proxy_secret_env: "CLI_MCP_PROXY_SECRET"   # never the secret itself
+  #   bind_to_session: true            # a POST must match the stream it drives
 
 catalog:
   path: "/etc/cli-mcp-server/catalog/"
