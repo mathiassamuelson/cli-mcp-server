@@ -16,7 +16,54 @@ porting changes by hand. See [docs/DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
 ## [Unreleased]
 
+### Added
+
+- `server.identity` — optional forwarded-identity support for deployments
+  behind an authenticating proxy. The identity joins `node`, `tool` and
+  `command` in the response envelope, and in a new per-call log line. It is
+  recorded, never enforced: authorization stays with the catalog rules and
+  with whatever authenticates in front. Omit the block and identity is `null`
+  everywhere, exactly as before. Four deliberate refusals, each with a
+  conformance probe: a blank identity under `require: true` is a **403**
+  rather than a call recorded as `unknown`; a missing or wrong `proxy_header`
+  secret is refused before the identity is even read; a repeated identity
+  header is refused rather than resolved to one of its values; and a
+  `proxy_secret_env` naming an unset variable stops the server at load rather
+  than running a check that accepts everything. `[api-change]`
+- `bind_to_session` (default `true`) binds the POST route to the identity that
+  opened its SSE stream. Authenticating only the GET leaves the session id
+  working as a bearer token with no expiry, and a call driven through somebody
+  else's stream would be *recorded against them*. Note this reaches into the
+  SDK's private `_read_stream_writers` to learn the session id, which has no
+  public accessor; it is arranged to fail closed and loudly — the attribute is
+  asserted at import, and a session with no recorded identity is refused.
+  `[security-boundary]` `[api-change]`
+- `bin/server.sh` accepts `UDS=` and systemd socket activation (`LISTEN_FDS`,
+  via `uvicorn --fd 3`) alongside `HOST`/`PORT`. `[build-coupled]`
+
 ### Fixed
+
+- The per-call log line now reaches the process output. `cli_mcp` logs at INFO
+  and uvicorn's default logging config attaches handlers to its own `uvicorn.*`
+  loggers while leaving root bare, so under `bin/server.sh` — the invocation
+  the project ships — every record propagated to a root with no handlers and
+  was dropped by Python's last-resort handler at WARNING. A `caplog` test
+  cannot see this, because caplog supplies both the level and the handler that
+  were missing; it was found by reading a live server's output and counting
+  zero lines. `cli_mcp` now installs a stderr handler when neither it nor root
+  has one, and leaves any host-configured logging alone. `[behavior-change]`
+
+### Changed
+
+- `configs/example.yaml` drops `server.host` and `server.port`. Nothing read
+  them — `cli_mcp.server` is an ASGI app and uvicorn does the binding — so
+  editing them to move the bind was a change that appeared to work and did
+  not. The bind is documented where it happens, in `bin/server.sh`.
+  `[build-coupled]`
+- README documents that `uvicorn --uds` chmods the socket to `0666`
+  unconditionally (`uds_perms = 0o666`, in both `Config.bind_socket` and
+  `Server.startup`), so a unix socket is not by itself an access boundary, and
+  gives the two arrangements that make it one.
 
 - `mcp` is pinned `>=1,<2`. It was unpinned, and mcp 2.0.0 removed the
   low-level `Server.list_tools()` / `call_tool()` decorators and the SSE

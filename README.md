@@ -70,8 +70,6 @@ Create `~/.config/cli-mcp-server/config.yaml`:
 
 ```yaml
 server:
-  host: "127.0.0.1"
-  port: 8100
   node_name: "local"
 
 catalog:
@@ -80,6 +78,8 @@ catalog:
     - /usr/bin
     - /bin
 ```
+
+The bind address is not in here — it is an argument to uvicorn, set in `bin/server.sh`. See [Running](#running).
 
 ### 3. Declare a tool
 
@@ -107,13 +107,13 @@ Create `~/.config/cli-mcp-server/catalog/ps.yaml`. Each file is a YAML **list** 
 bin/server.sh
 ```
 
-Defaults to `0.0.0.0:8100`. Override with `HOST` and `PORT`.
+Defaults to `0.0.0.0:8100`. Override with `HOST` and `PORT`, or bind a unix socket — see [Running](#running).
 
 ### 5. Verify
 
 ```bash
 curl http://127.0.0.1:8100/health
-# {"status":"ok","node":"local","tools":["ps"]}
+# {"status":"ok","node":"local","tools":[{"name":"ps","healthy":true}]}
 ```
 
 ---
@@ -126,8 +126,8 @@ YAML file with two sections:
 
 | Section | Purpose |
 |---|---|
-| `server.host`, `server.port` | Bind address. |
 | `server.node_name` | Identifier returned in every tool response. Useful when one client connects to multiple cli-mcp-server instances; the agent can route by node. |
+| `server.identity` | Optional. Read a caller identity forwarded by an authenticating proxy. See [Forwarded identity](#forwarded-identity). |
 | `catalog.path` | Directory holding tool entry YAML files. |
 | `catalog.search_paths` | Where to resolve bare binary names. Never falls back to `$PATH`. |
 | `catalog.defaults` | Optional defaults applied to every tool entry (e.g. a default `timeout_seconds`). |
@@ -264,12 +264,15 @@ Every tool returns a JSON envelope:
   "node": "local",
   "tool": "ps",
   "command": "aux",
+  "identity": null,
   "status": "success",
   "exit_code": 0,
   "execution_time_ms": 42,
   "result": "USER PID %CPU %MEM ...\n..."
 }
 ```
+
+`identity` is who the call was made for, when [forwarded identity](#forwarded-identity) is configured. It is always present, and `null` — never a placeholder string — when identity is not established. A reader can tell "this deployment does not establish identity" from a name; it can never read a placeholder as a person.
 
 `status` is one of:
 
@@ -290,7 +293,76 @@ export CLI_MCP_CONFIG=/path/to/config.yaml
 bin/server.sh
 ```
 
-`bin/server.sh` activates `.venv` and runs `uvicorn cli_mcp.server:app`. `HOST` and `PORT` env vars override the bind defaults.
+`bin/server.sh` activates `.venv` and runs `uvicorn cli_mcp.server:app`. It picks one of three binds, in this order:
+
+| Set | Bind | Notes |
+|---|---|---|
+| `LISTEN_FDS` | systemd socket activation, `--fd 3` | The only way to get a unix socket with a chosen owner, group and mode. |
+| `UDS=/path/sock` | uvicorn binds the socket | **Mode is forced to `0666`** — see below. |
+| `HOST` / `PORT` | TCP | The default, `0.0.0.0:8100`. |
+
+The bind is deliberately *not* in the config file: `cli_mcp.server` is an ASGI app and uvicorn does the binding. Earlier versions of `configs/example.yaml` carried `host:`/`port:` keys that nothing read.
+
+### A unix socket does not protect itself
+
+`--uds` looks like it makes access a filesystem-permission question. It does not, on its own: uvicorn chmods the socket to `0666` unconditionally — `uds_perms = 0o666` in both `Config.bind_socket` and `Server.startup`, with no setting in front of it. It preserves the mode only if a file already exists at that path. So any process on the host can connect to a socket uvicorn created, and a deployment treating that socket as its access boundary does not have one.
+
+Two fixes, and they compose:
+
+- **Socket activation**, so systemd creates the socket and sets its mode:
+
+  ```ini
+  # cli-mcp-server.socket
+  [Socket]
+  ListenStream=/run/cli-mcp-server/mcp.sock
+  SocketUser=cli-mcp
+  SocketGroup=www-data
+  SocketMode=0660
+  ```
+
+  uvicorn inherits the listening socket and never chmods it.
+
+- **Put the socket in a directory that does the work** — `/run/cli-mcp-server` owned `cli-mcp:www-data`, mode `0750`. Traversal is denied regardless of the mode on the socket itself, which also covers the case where somebody later switches back to `--uds`.
+
+Verify rather than assume, since this is invisible when wrong:
+
+```bash
+stat -c '%a %U:%G' /run/cli-mcp-server/mcp.sock    # expect: 660 cli-mcp:www-data
+```
+
+### Forwarded identity
+
+The server authenticates nobody. When something in front of it does — an OIDC-terminating reverse proxy, say — `server.identity` lets the server *record* who a call was made for, in the response envelope and in a log line per call:
+
+```yaml
+server:
+  node_name: "inference"
+  identity:
+    header: "X-Auth-Request-Email"
+    require: true
+    proxy_header: "X-Trail-Proxy"
+    proxy_secret_env: "CLI_MCP_PROXY_SECRET"
+    bind_to_session: true
+```
+
+| Key | Meaning |
+|---|---|
+| `header` | The header carrying the identity. The proxy must set it on **every** route, overwriting whatever the client sent. |
+| `require` | `true` (default): a missing or blank identity is a **403**. It is never recorded as `unknown` and allowed through. |
+| `proxy_header` | Optional. A header proving the request came via the proxy. Absent or wrong ⇒ 403, checked *before* the identity. |
+| `proxy_secret_env` | Environment variable holding the expected value. Never the secret itself — this file is committed; the secret is not. |
+| `bind_to_session` | `true` (default): a POST to `/mcp/messages` must carry the same identity as the GET that opened the stream. |
+
+Omit the block entirely and identity is `null` everywhere — the behaviour of every release before 0.3.0.
+
+Four things worth knowing:
+
+- **The identity key is always present, and `null` rather than a placeholder** when identity is not configured or not required. A consumer can tell "this deployment does not establish identity" from a name; it can never mistake a placeholder for a person.
+- **`require: true` means 403, not a default.** A proxy that stops setting the header is the likeliest way this breaks, and it breaks in the direction of everything-still-working: every call succeeds and every record says "unknown". Refusing is the only version of this that is visible.
+- **A misconfigured block stops the server.** If `proxy_secret_env` names a variable that is unset or empty, the server refuses to start rather than run with a check that accepts everything.
+- **Both routes are checked.** Authenticating only the SSE GET would make the session id a bearer token with no expiry — and the resulting call would be recorded against whoever opened the stream, naming the wrong person. `bind_to_session` closes that.
+
+The per-call log line records the command, which for many catalogs is the substance of the question being asked. Make a deliberate retention choice about it rather than inheriting a default.
 
 The server is designed to run on the host alongside the binaries it wraps — most useful CLI tools have host coupling (config files, Unix sockets, log directories, dynamically linked dependencies) that makes containerizing them more trouble than it's worth. Run it under systemd, supervisord, or whatever your platform's process manager of choice is.
 
@@ -324,6 +396,8 @@ asyncio.run(main())
 ## Security notes
 
 - **Network exposure.** Default bind is `0.0.0.0:8100`. There's no auth on the server itself — wrap it behind a VPN, a reverse proxy with mTLS, or bind to localhost. The threat model is "an agent in a controlled network calling tools," not "anyone on the internet calling tools."
+- **A unix socket is not automatically a boundary.** uvicorn's `--uds` chmods the socket to `0666`. Use socket activation or a restrictive parent directory — see [Running](#running).
+- **Forwarded identity is recorded, not enforced.** `server.identity` says *who* a call was for; it does not decide *whether* the call is allowed. Authorization stays with the catalog's allow/deny rules and with whatever authenticates in front.
 - **No shell, ever.** Commands are tokenized with `shlex.split` and executed via `create_subprocess_exec`. Pipelines chain subprocess stdouts into stdins directly — there is no `/bin/sh -c`. `$(rm -rf /)` in a command string is a literal argument, not a substitution.
 - **Sanitized subprocess environment.** Every tool runs with a minimal env: `PATH`, `LANG`, `LC_ALL` only. The server's own environment doesn't leak through.
 - **`search_paths`, not `$PATH`.** Bare binary names in catalog entries resolve only against the explicit list. An agent cannot influence which binary runs by manipulating environment variables.
@@ -337,7 +411,7 @@ asyncio.run(main())
 
 ```bash
 pip install -e ".[dev]"
-pytest                 # run tests (120)
+pytest                 # run tests (157)
 pytest -m "not e2e"    # skip socket-binding end-to-end tests
 ruff check .           # lint
 ```
